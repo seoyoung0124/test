@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import streamlit as st
 from streamlit_calendar import calendar
@@ -327,17 +327,15 @@ for e in events:
     })
 
 # cal_ver: 바뀌면 캘린더가 새로 만들어져 이전 클릭 값이 초기화됩니다.
-# cal_view_date: 사용자가 현재 보고 있는 달 (월 이동 시 갱신)
-# cal_start_date: 캘린더를 새로 만들 때 시작할 달 (재생성 시점에만 갱신)
-today_iso = date.today().isoformat()
+# cal_start_date: 캘린더를 새로 만들 때 시작할 달 (클릭한 날짜의 달)
 st.session_state.setdefault("cal_ver", 0)
-st.session_state.setdefault("cal_view_date", today_iso)
-st.session_state.setdefault("cal_start_date", today_iso)
+st.session_state.setdefault("cal_start_date", date.today().isoformat())
 
 
-def refresh_calendar():
-    """캘린더를 새로 만들되, 보던 달은 유지한다."""
-    st.session_state.cal_start_date = st.session_state.cal_view_date
+def refresh_calendar(start_date):
+    """캘린더를 새로 만들되, 클릭한 날짜가 있는 달을 계속 보여준다."""
+    if start_date:
+        st.session_state.cal_start_date = start_date
     st.session_state.cal_ver += 1
 
 
@@ -367,7 +365,7 @@ state = calendar(
         "displayEventTime": False,
         "fixedWeekCount": False
     },
-    callbacks=["dateClick", "eventClick", "datesSet"],
+    callbacks=["dateClick", "eventClick"],
     key=f"main_calendar_{st.session_state.cal_ver}"
 )
 
@@ -379,22 +377,11 @@ state = calendar(
 if isinstance(state, dict):
     callback = state.get("callback")
 
-    if callback == "datesSet":
-        # 현재 보고 있는 달을 기억 (표시 범위 시작일 + 15일 = 해당 달 중간)
-        view = (state.get("datesSet") or {}).get("view") or {}
-        raw = view.get("currentStart")
+    dc = state.get("dateClick")
+    ec = state.get("eventClick")
 
-        if raw:
-            try:
-                dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-                st.session_state.cal_view_date = (
-                    dt + timedelta(days=15)
-                ).date().isoformat()
-            except ValueError:
-                pass
-
-    elif callback == "dateClick":
-        dc = state.get("dateClick") or {}
+    if callback == "dateClick" or (callback is None and isinstance(dc, dict)):
+        dc = dc or {}
         # dateStr(로컬 날짜)을 우선 사용 — date는 UTC라 하루 밀릴 수 있음
         picked = date_from(dc.get("dateStr") or dc.get("date"))
 
@@ -402,15 +389,19 @@ if isinstance(state, dict):
             st.session_state.selected_date = picked
             st.session_state.edit_event_id = None
             st.session_state.show_event_form = True
-            refresh_calendar()
+            refresh_calendar(picked)
             st.rerun()
 
-    elif callback == "eventClick":
-        event_data = (state.get("eventClick") or {}).get("event") or {}
+    elif callback == "eventClick" or (callback is None and isinstance(ec, dict)):
+        event_data = (ec or {}).get("event") or {}
 
         if event_data.get("id"):
             st.session_state.view_event_id = str(event_data["id"])
-            refresh_calendar()
+            clicked = next(
+                (e for e in events if e["id"] == str(event_data["id"])),
+                None
+            )
+            refresh_calendar(clicked["date"] if clicked else None)
             st.rerun()
 
 
