@@ -80,18 +80,11 @@ def fetch_day_events(client, uid, day):
             "description": r.get("description") or "",
             "importance": importance if importance in IMPORTANCE_ORDER else "없음",
             "categories": [x for x in cats if x in CATEGORIES],
-            "start_time": str(r.get("start_time") or "")[:5],
-            "end_time": str(r.get("end_time") or "")[:5],
             "done": bool(r.get("done"))
         })
 
-    # 시간이 있는 일정은 시간순으로 먼저, 시간이 없는 일정은 중요도순으로 뒤에
-    result.sort(key=lambda e: (
-        0 if e["start_time"] else 1,
-        e["start_time"],
-        IMPORTANCE_ORDER[e["importance"]],
-        e["title"]
-    ))
+    # 중요한 일정이 위로 오도록 정렬
+    result.sort(key=lambda e: (IMPORTANCE_ORDER[e["importance"]], e["title"]))
     return result
 
 
@@ -118,14 +111,6 @@ def day_label(day):
     if diff > 0:
         return f"D-{diff}"
     return f"D+{-diff}"
-
-
-def time_text(e):
-    if not e["start_time"]:
-        return ""
-    if e["end_time"]:
-        return f"{e['start_time']} ~ {e['end_time']}"
-    return e["start_time"]
 
 
 # ==========================================
@@ -178,7 +163,7 @@ with center:
         day_events = fetch_day_events(client, uid, day)
     except Exception as exc:
         st.error(f"일정을 불러오지 못했습니다: {exc}")
-        st.info("Supabase events 테이블에 start_time, end_time, done 컬럼이 있는지 확인해 주세요.")
+        st.info("Supabase events 테이블에 done 컬럼이 있는지 확인해 주세요.")
         st.stop()
 
     total = len(day_events)
@@ -216,8 +201,6 @@ with center:
             )
 
             info = []
-            if time_text(e):
-                info.append(f"🕘 {time_text(e)}")
             if e["importance"] != "없음":
                 info.append(f"중요도 {e['importance']}")
             if e["categories"]:
