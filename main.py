@@ -352,8 +352,6 @@ state = calendar(
         "contentHeight": 650,
         "expandRows": True,
         "dayMaxEvents": 4,
-        "dateClick": True,
-        "eventClick": True,
         "selectable": True,
         "editable": False,
         "headerToolbar": {
@@ -368,7 +366,6 @@ state = calendar(
     callbacks=["dateClick", "eventClick"],
     key=f"main_calendar_{st.session_state.cal_ver}"
 )
-st.write("디버그:", state)
 
 
 # ==========================================
