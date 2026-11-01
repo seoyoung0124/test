@@ -1,229 +1,241 @@
+from datetime import date, datetime, timedelta, timezone
 
 import streamlit as st
-from datetime import date, timedelta
+
+
+# ==========================================
+# 1. 기본 설정
+# ==========================================
 
 st.set_page_config(
-    page_title="Main List",
-    page_icon="🗓️",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+    page_title="하루결 | 플래너",
+    page_icon="📒",
+    layout="centered"
 )
 
-# -------------------------
-# 디자인
-# -------------------------
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #ffffff;
-    }
+KST = timezone(timedelta(hours=9))
+WEEKDAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 1250px;
-    }
+CATEGORIES = [
+    "수행평가", "시험", "동아리",
+    "개인일정", "과제", "학교행사", "기타"
+]
 
-    h1, h2, h3, p, label {
-        color: #222222;
-    }
+IMPORTANCE_ICON = {"상": "🔴", "중": "🟡", "하": "🟢", "없음": "🟣"}
+IMPORTANCE_ORDER = {"상": 0, "중": 1, "하": 2, "없음": 3}
+PERSONAL_ICON = "🔵"
 
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #e8e8e8;
-        border-radius: 12px;
-    }
 
-    div.stButton > button {
-        border: none;
-        background: transparent;
-        color: #222222;
-        font-size: 24px;
-    }
+def today_kst():
+    # 서버가 UTC여도 한국 시간 기준으로 오늘 날짜를 구한다
+    return datetime.now(KST).date()
 
-    div.stButton > button:hover {
-        background: #f5f5f5;
-        color: #111111;
-    }
 
-    div[data-testid="stCheckbox"] {
-        padding-top: 4px;
-        padding-bottom: 4px;
-    }
+# ==========================================
+# 2. 로그인 확인 (main.py에서 로그인한 세션을 그대로 사용)
+# ==========================================
 
-    hr {
-        border-color: #eeeeee;
-    }
-</style>
-""", unsafe_allow_html=True)
+client = st.session_state.get("supabase_client")
+uid = st.session_state.get("user_id")
 
-# -------------------------
-# 일정 데이터
-# -------------------------
-if "events" not in st.session_state:
-    st.session_state.events = []
+if not client or not uid:
+    st.title("📒 오늘의 플래너")
+    st.info("먼저 캘린더 화면에서 로그인해 주세요.")
 
-events = st.session_state.events
+    try:
+        st.page_link("main.py", label="로그인하러 가기", icon="🗓️")
+    except Exception:
+        pass
 
-# 날짜별로 정렬
-events.sort(
-    key=lambda e: (e["date"], e["start"])
-)
+    st.stop()
 
-# 최초 플래너 날짜 설정
-if "planner_date" not in st.session_state:
-    if events:
-        st.session_state.planner_date = date.fromisoformat(
-            events[0]["date"]
-        )
-    else:
-        st.session_state.planner_date = date.today()
 
-if "completed_events" not in st.session_state:
-    st.session_state.completed_events = set()
+# ==========================================
+# 3. 선택한 날짜의 일정 불러오기 / 완료 상태 저장
+# ==========================================
 
-# -------------------------
-# 전체 화면 구성
-# -------------------------
-left, main = st.columns([1.1, 4.9], gap="large")
-
-# 왼쪽 메뉴
-with left:
-    st.write("")
-    st.markdown("## Main")
-    st.markdown("## List")
-
-    st.divider()
-
-    st.caption("MY PLANNER")
-    st.write("하루의 일정을")
-    st.write("차근차근 완성해 보세요.")
-
-    st.write("")
-
-    if st.button("＋ 일정 추가", use_container_width=True):
-        st.switch_page("main.py")
-
-# 가운데 플래너
-with main:
-    st.write("")
-
-    # 날짜 이동 버튼
-    prev_col, date_col, next_col = st.columns(
-        [1, 5, 1],
-        vertical_alignment="center"
+def fetch_day_events(client, uid, day):
+    rows = (
+        client.table("events")
+        .select("*")
+        .eq("user_id", uid)
+        .eq("event_date", day.isoformat())
+        .execute()
+        .data or []
     )
 
-    with prev_col:
-        if st.button("‹", key="prev_day", use_container_width=True):
-            st.session_state.planner_date -= timedelta(days=1)
-            st.rerun()
+    result = []
 
-    with date_col:
-        current_date = st.session_state.planner_date
+    for r in rows:
+        cats = r.get("categories") or []
 
-        st.markdown(
-            f"<div style='text-align:center;'>"
-            f"<span style='font-size:12px; color:#999999;"
-            f"letter-spacing:2px;'>DAILY PLANNER</span>"
-            f"<h2 style='margin-top:8px; font-size:26px;'>"
-            f"{current_date.strftime('%Y.%m.%d')}</h2>"
-            f"<span style='color:#888888;'>"
-            f"{current_date.strftime('%A')}</span>"
-            f"</div>",
-            unsafe_allow_html=True
+        if isinstance(cats, str):
+            cats = [cats]
+
+        importance = r.get("importance")
+
+        result.append({
+            "id": str(r["id"]),
+            "title": r.get("title") or "(제목 없음)",
+            "description": r.get("description") or "",
+            "importance": importance if importance in IMPORTANCE_ORDER else "없음",
+            "categories": [x for x in cats if x in CATEGORIES],
+            "start_time": str(r.get("start_time") or "")[:5],
+            "end_time": str(r.get("end_time") or "")[:5],
+            "done": bool(r.get("done"))
+        })
+
+    # 시간이 있는 일정은 시간순으로 먼저, 시간이 없는 일정은 중요도순으로 뒤에
+    result.sort(key=lambda e: (
+        0 if e["start_time"] else 1,
+        e["start_time"],
+        IMPORTANCE_ORDER[e["importance"]],
+        e["title"]
+    ))
+    return result
+
+
+def toggle_done(event_id):
+    key = f"done_{event_id}"
+    new_value = bool(st.session_state.get(key, False))
+
+    try:
+        st.session_state.supabase_client.table("events").update(
+            {"done": new_value}
+        ).eq("id", event_id).eq(
+            "user_id", st.session_state.user_id
+        ).execute()
+    except Exception as exc:
+        st.session_state[key] = not new_value
+        st.toast(f"완료 상태를 저장하지 못했습니다: {exc}")
+
+
+def day_label(day):
+    diff = (day - today_kst()).days
+
+    if diff == 0:
+        return "오늘"
+    if diff > 0:
+        return f"D-{diff}"
+    return f"D+{-diff}"
+
+
+def time_text(e):
+    if not e["start_time"]:
+        return ""
+    if e["end_time"]:
+        return f"{e['start_time']} ~ {e['end_time']}"
+    return e["start_time"]
+
+
+# ==========================================
+# 4. 날짜 이동 (화살표 / 날짜 선택 / 오늘 버튼)
+# ==========================================
+
+if "planner_picker" not in st.session_state:
+    st.session_state.planner_picker = today_kst()
+
+
+def shift_day(delta):
+    st.session_state.planner_picker += timedelta(days=delta)
+
+
+def go_today():
+    st.session_state.planner_picker = today_kst()
+
+
+st.title("📒 플래너")
+
+_, pick_col, today_col, _ = st.columns([1, 3, 1.2, 1], vertical_alignment="bottom")
+
+with pick_col:
+    day = st.date_input("날짜 선택", key="planner_picker", format="YYYY-MM-DD")
+
+with today_col:
+    st.button("오늘", on_click=go_today, use_container_width=True, key="go_today")
+
+
+# ==========================================
+# 5. 플래너 (가운데) + 전날/다음날 화살표 (양 옆)
+# ==========================================
+
+left, center, right = st.columns([1, 6, 1], vertical_alignment="center")
+
+with left:
+    st.button(
+        "◀", on_click=shift_day, args=(-1,),
+        use_container_width=True, key="prev_day", help="전날"
+    )
+
+with right:
+    st.button(
+        "▶", on_click=shift_day, args=(1,),
+        use_container_width=True, key="next_day", help="다음날"
+    )
+
+with center:
+    try:
+        day_events = fetch_day_events(client, uid, day)
+    except Exception as exc:
+        st.error(f"일정을 불러오지 못했습니다: {exc}")
+        st.info("Supabase events 테이블에 start_time, end_time, done 컬럼이 있는지 확인해 주세요.")
+        st.stop()
+
+    total = len(day_events)
+    done_count = sum(e["done"] for e in day_events)
+
+    with st.container(border=True):
+        st.caption(f"{day_label(day)} · 일정 {total}개 · 완료 {done_count}/{total}")
+        st.subheader(
+            f"{day.year}년 {day.month}월 {day.day}일 ({WEEKDAYS[day.weekday()]})"
         )
 
-    with next_col:
-        if st.button("›", key="next_day", use_container_width=True):
-            st.session_state.planner_date += timedelta(days=1)
-            st.rerun()
-
-    st.write("")
-
-    # 해당 날짜 일정만 가져오기
-    day_events = [
-        event for event in events
-        if event["date"] == current_date.isoformat()
-    ]
-
-    # 플래너 카드
-    with st.container(border=True):
-        st.markdown("##### TODAY'S SCHEDULE")
-        st.caption(f"총 {len(day_events)}개의 일정")
+        if total:
+            st.progress(done_count / total)
 
         st.divider()
 
-        if day_events:
-            for event in day_events:
-                event_key = f"{event['date']}_{event['id']}"
-                is_done = event_key in st.session_state.completed_events
+        if not day_events:
+            st.write("이 날은 등록된 일정이 없어요.")
 
-                task_col, time_col = st.columns([4, 1])
-
-                with task_col:
-                    checked = st.checkbox(
-                        event["title"],
-                        value=is_done,
-                        key=f"check_{event_key}"
-                    )
-
-                    if checked:
-                        st.session_state.completed_events.add(event_key)
-                    else:
-                        st.session_state.completed_events.discard(event_key)
-
-                    if event.get("memo"):
-                        st.caption(event["memo"])
-
-                with time_col:
-                    st.markdown(
-                        f"<div style='text-align:right;"
-                        f"font-size:12px;color:#888888;"
-                        f"padding-top:8px;'>"
-                        f"{event['start']}<br>~ {event['end']}"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
-
-                st.divider()
-
-            completed_count = sum(
-                1 for event in day_events
-                if f"{event['date']}_{event['id']}"
-                in st.session_state.completed_events
+        for e in day_events:
+            icon = (
+                PERSONAL_ICON
+                if "개인일정" in e["categories"]
+                else IMPORTANCE_ICON[e["importance"]]
             )
 
-            st.caption(
-                f"완료한 일정 {completed_count} / {len(day_events)}"
+            title = f"~~{e['title']}~~" if e["done"] else f"**{e['title']}**"
+
+            st.checkbox(
+                f"{icon} {title}",
+                value=e["done"],
+                key=f"done_{e['id']}",
+                on_change=toggle_done,
+                args=(e["id"],)
             )
 
-            st.progress(completed_count / len(day_events))
+            info = []
+            if time_text(e):
+                info.append(f"🕘 {time_text(e)}")
+            if e["importance"] != "없음":
+                info.append(f"중요도 {e['importance']}")
+            if e["categories"]:
+                info.append(", ".join(e["categories"]))
+            if info:
+                st.caption(" · ".join(info))
 
-        else:
-            st.markdown(
-                "<div style='text-align:center;padding:35px 5px;'>"
-                "<p style='font-size:30px;'>☁️</p>"
-                "<p style='color:#888888;'>"
-                "이 날짜에는 등록된 일정이 없어요.</p>"
-                "</div>",
-                unsafe_allow_html=True
-            )
+            if e["description"]:
+                st.write(e["description"])
 
-    st.write("")
 
-    # 날짜 바로 선택
-    with st.expander("날짜 바로 선택하기"):
-        picked_date = st.date_input(
-            "플래너 날짜",
-            value=current_date,
-            key="date_picker"
-        )
+# ==========================================
+# 6. 캘린더로 돌아가기
+# ==========================================
 
-        if st.button("이 날짜 보기", use_container_width=True):
-            st.session_state.planner_date = picked_date
-            st.rerun()
+st.divider()
 
-    st.write("")
-
-    if st.button("← 캘린더로 돌아가기", use_container_width=True):
-        st.switch_page("main.py")
+try:
+    st.page_link("main.py", label="캘린더로 돌아가기", icon="🗓️")
+except Exception:
+    pass
