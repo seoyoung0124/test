@@ -368,6 +368,7 @@ state = calendar(
     callbacks=["dateClick", "eventClick"],
     key=f"main_calendar_{st.session_state.cal_ver}"
 )
+st.write("디버그:", state)
 
 
 # ==========================================
